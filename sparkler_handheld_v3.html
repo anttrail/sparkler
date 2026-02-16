@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>手拿仙女棒 ✨ v3（全螢幕/鐵絲/搖晃增亮/下方置中）</title>
+<style>
+  html, body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; }
+  canvas { display:block; touch-action:none; }
+
+  .ui{
+    position:fixed; left:50%; transform:translateX(-50%);
+    top:14px; z-index:10; text-align:center; color:#fff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+    user-select:none;
+    pointer-events:none;
+  }
+  .row{ display:flex; gap:10px; justify-content:center; align-items:center; flex-wrap:wrap; pointer-events:auto; }
+  button{
+    padding:11px 16px; border-radius:999px; border:0;
+    background:#ffd34d; color:#111; font-size:15px; font-weight:800;
+  }
+  button.secondary{ background:#2a2a2a; color:#fff; font-weight:650; }
+  .pill{
+    display:inline-block; padding:8px 12px; border-radius:999px;
+    background: rgba(255,255,255,0.12); font-size:14px;
+  }
+  .hint{ margin-top:8px; opacity:.8; font-size:12px; max-width: 92vw; pointer-events:none; }
+
+  /* Fullscreen starter overlay (for browsers that block auto fullscreen) */
+  .overlay{
+    position:fixed; inset:0; z-index:999;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 50% 40%, rgba(255,220,140,0.10), rgba(0,0,0,0.92));
+    color:#fff; text-align:center; padding:24px;
+  }
+  .panel{
+    width:min(520px, 92vw);
+    border-radius:20px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 14px 40px rgba(0,0,0,0.55);
+    padding:18px 16px;
+  }
+  .title{ font-size:18px; font-weight:900; margin-bottom:10px; }
+  .desc{ font-size:13px; opacity:.9; line-height:1.55; margin-bottom:14px; }
+  .bigbtn{
+    width:100%;
+    padding:14px 16px;
+    border-radius:999px; border:0;
+    background:#ffd34d; color:#111;
+    font-size:16px; font-weight:950;
+  }
+  .small{ margin-top:10px; font-size:12px; opacity:.75; }
+</style>
+</head>
+<body>
+
+<div class="ui" id="ui">
+  <div class="row">
+    <button id="btnStart">點燃 ✨</button>
+    <button id="btnFs" class="secondary">全螢幕</button>
+    <span class="pill" id="timer">未點燃</span>
+  </div>
+  <div class="hint">進入頁面：仙女棒在「底部中央」。拖曳＝移動手握位置。搖晃會更閃亮，然後慢慢恢復。</div>
+</div>
+
+<div class="overlay" id="overlay" style="display:none;">
+  <div class="panel">
+    <div class="title">點一下啟動全螢幕 ✨</div>
+    <div class="desc">
+      多數手機瀏覽器不允許「進頁面就自動全螢幕」；點一下即可進全螢幕並（iPhone）授權搖晃增亮功能。
+    </div>
+    <button class="bigbtn" id="btnOverlayStart">開始（全螢幕）</button>
+    <div class="small">不想全螢幕：也可以關掉這層後按右上「全螢幕」。</div>
+  </div>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: true });
+
+  const timerEl = document.getElementById("timer");
+  const btnStart = document.getElementById("btnStart");
+  const btnFs = document.getElementById("btnFs");
+  const overlay = document.getElementById("overlay");
+  const btnOverlayStart = document.getElementById("btnOverlayStart");
+
+  // ---------- Fullscreen ----------
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  async function enterFullscreen() {
+    const el = document.documentElement;
+    if (isFullscreen()) return true;
+    try {
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); // iOS Safari
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  async function exitFullscreen() {
+    try {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (_) {}
+  }
+  async function toggleFullscreen() {
+    if (!isFullscreen()) await enterFullscreen();
+    else await exitFullscreen();
+    syncFsButton();
+    setTimeout(resize, 120);
+    setTimeout(resize, 420);
+  }
+  function syncFsButton() {
+    btnFs.textContent = isFullscreen() ? "退出全螢幕" : "全螢幕";
+  }
+  btnFs.addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", syncFsButton);
+  document.addEventListener("webkitfullscreenchange", syncFsButton);
+
+  // ---------- Resize ----------
+  let handleX;
+  let handleY;
+  let initialized = false;
+
+  function resize() {
+    const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    canvas.width  = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    canvas.style.width = innerWidth + "px";
+    canvas.style.height = innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // 初始定位：螢幕下方中央（只做一次）
+    if (!initialized) {
+      handleX = innerWidth * 0.5;
+      handleY = innerHeight - 70;
+      initialized = true;
+    }
+  }
+  addEventListener("resize", resize);
+  if (window.visualViewport) visualViewport.addEventListener("resize", () => setTimeout(resize, 0));
+  resize();
+
+  // ---------- Burn settings ----------
+  const DURATION_MS = 90_000;
+  let burning = false;
+  let startAt = 0;
+
+  // Handheld stick: always vertical
+  const stickLen = () => Math.min(innerHeight * 0.42, 390);
+  const stickWidth = 9.5;
+  const sparkOffset = 14;
+
+  // Shake flash boost (0..~2.2), decays over time
+  let flashBoost = 0;
+  const FLASH_DECAY = 0.92; // bigger -> slower decay
+  const FLASH_GAIN = 0.045; // shake sensitivity
+
+  // Physics
+  const gravity = 0.06;
+  const airDrag = 0.992;
+
+  const sparks = [];
+  const embers = [];
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function norm(vx,vy){
+    const m = Math.hypot(vx,vy) || 1;
+    return { x: vx/m, y: vy/m };
+  }
+
+  function tipPos(){
+    const len = stickLen();
+    return { x: handleX, y: handleY - len };
+  }
+
+  // Move handle by dragging (still feels like holding)
+  function setHandle(px, py){
+    handleX = clamp(px, 44, innerWidth - 44);
+    handleY = clamp(py, innerHeight*0.55, innerHeight - 44);
+  }
+  addEventListener("pointerdown", (e)=> setHandle(e.clientX, e.clientY), {passive:true});
+  addEventListener("pointermove", (e)=> {
+    if (e.buttons || e.pointerType === "touch") setHandle(e.clientX, e.clientY);
+  }, {passive:true});
+
+  // ---------- Motion permission + shake detection ----------
+  let motionEnabled = false;
+
+  async function ensureMotionPermission() {
+    try {
+      const D = DeviceMotionEvent;
+      if (D && typeof D.requestPermission === "function") {
+        const res = await D.requestPermission();
+        return res === "granted";
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function attachMotionListeners(){
+    if (motionEnabled) return;
+    motionEnabled = true;
+
+    addEventListener("devicemotion", (e) => {
+      const a = e.accelerationIncludingGravity || e.acceleration;
+      if (!a) return;
+      const ax = a.x || 0, ay = a.y || 0, az = a.z || 0;
+
+      // magnitude
+      const mag = Math.sqrt(ax*ax + ay*ay + az*az);
+
+      // map to shake intensity
+      const shake = clamp((mag - 9.8) * 0.8, 0, 18);
+      flashBoost = clamp(flashBoost + shake * FLASH_GAIN, 0, 2.2);
+    }, { passive: true });
+  }
+
+  // ---------- Sparkler behavior ----------
+  function intensity(t01){
+    const base = 0.95 - 0.30 * t01;
+    const lastBoost = (t01 > (1 - 10/90)) ? 1.7 : 1.0;
+    return clamp(base * lastBoost, 0.15, 2.0);
+  }
+
+  function spawnSpark(n, power, heat){
+    const tip = tipPos();
+    const fb = flashBoost;
+    const countBoost = 1 + fb * 0.85;
+    const speedBoost = 1 + fb * 0.55;
+
+    const N = Math.floor(n * countBoost);
+
+    for(let i=0;i<N;i++){
+      const spread = rand(-0.75, 0.75);
+      const dir = norm(
+        spread * 1.0,
+        (-1.0) + spread * 0.18
+      );
+
+      const spd  = rand(2.2, 6.8) * power * speedBoost;
+      const life = Math.floor(rand(20, 55));
+      const size = rand(0.8, 2.6) * (1 + fb * 0.15);
+
+      sparks.push({
+        x: tip.x,
+        y: tip.y - sparkOffset,
+        vx: dir.x * spd + rand(-0.55, 0.55),
+        vy: dir.y * spd + rand(-0.55, 0.55),
+        life, maxLife: life,
+        size,
+        heat,
+        tw: rand(0.7, 1.35) * (1 + fb*0.35)
+      });
+    }
+  }
+
+  function spawnEmber(k){
+    const tip = tipPos();
+    const fb = flashBoost;
+    const K = k + Math.floor(fb * 2.5);
+    for(let i=0;i<K;i++){
+      embers.push({
+        x: tip.x + rand(-6,6),
+        y: tip.y + rand(-8,8),
+        vx: rand(-0.35,0.35),
+        vy: rand(-0.9,-0.15),
+        life: Math.floor(rand(120, 220)),
+        maxLife: 220,
+        size: rand(0.7, 1.8) * (1 + fb*0.08)
+      });
+    }
+  }
+
+  function drawCore(power){
+    const tip = tipPos();
+    const cx = tip.x;
+    const cy = tip.y - sparkOffset;
+
+    const fb = flashBoost;
+    const glowBoost = 1 + fb * 0.95;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    const glowR = (26 + power*18) * glowBoost;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+    g.addColorStop(0, `rgba(255,255,255,${0.62 + fb*0.18})`);
+    g.addColorStop(0.25, `rgba(255,230,140,${0.34 + fb*0.12})`);
+    g.addColorStop(0.7, "rgba(255,140,40,0.12)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, glowR, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(255,255,255,${0.85 + fb*0.10})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, (2.2 + power*0.9) * (1 + fb*0.25), 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // --- Twisted wire stick (double strand + highlights) ---
+  function drawWireStick(){
+    const len = stickLen();
+    const tip = tipPos();
+
+    const x0 = handleX, y0 = handleY;
+    const x1 = tip.x,     y1 = tip.y;
+
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const L = Math.hypot(dx, dy) || 1;
+
+    const nx = -dy / L;
+    const ny =  dx / L;
+
+    ctx.save();
+
+    // faint warm glow
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,200,80,0.06)";
+    ctx.lineWidth = stickWidth + 7;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
+
+    ctx.globalCompositeOperation = "source-over";
+
+    function strokeWire(offset, a, b, c){
+      ctx.lineCap = "round";
+      ctx.lineWidth = stickWidth * 0.55;
+      const grad = ctx.createLinearGradient(x0,y0,x1,y1);
+      grad.addColorStop(0, a);
+      grad.addColorStop(0.55, b);
+      grad.addColorStop(1, c);
+      ctx.strokeStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(x0 + nx*offset, y0 + ny*offset);
+      ctx.lineTo(x1 + nx*offset, y1 + ny*offset);
+      ctx.stroke();
+    }
+
+    strokeWire(+2.2, "rgba(120,120,120,0.95)", "rgba(210,210,210,0.95)", "rgba(105,105,105,0.95)");
+    strokeWire(-2.2, "rgba(110,110,110,0.95)", "rgba(200,200,200,0.95)", "rgba(95,95,95,0.95)");
+
+    // twist marks
+    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+    ctx.lineWidth = 1.2;
+    const step = 14;
+    for (let t = 10; t < L-18; t += step) {
+      const px = x0 + dx*(t/L);
+      const py = y0 + dy*(t/L);
+      const s = (Math.floor(t/step) % 2 === 0) ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(px + nx*4*s, py + ny*4*s);
+      ctx.lineTo(px - nx*4*s, py - ny*4*s);
+      ctx.stroke();
+    }
+
+    // grip
+    ctx.strokeStyle = "rgba(45,45,45,0.98)";
+    ctx.lineWidth = stickWidth + 5;
+    ctx.beginPath();
+    ctx.moveTo(handleX, handleY);
+    ctx.lineTo(handleX, handleY + Math.min(80, innerHeight*0.09));
+    ctx.stroke();
+
+    // charred tip
+    ctx.strokeStyle = "rgba(25,25,25,0.88)";
+    ctx.lineWidth = stickWidth + 1;
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x, tip.y + Math.min(24, len*0.08));
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawSparks(){
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+
+    const fb = flashBoost;
+
+    for(let i=sparks.length-1; i>=0; i--){
+      const p = sparks[i];
+
+      p.vx *= airDrag;
+      p.vy = p.vy*airDrag + gravity;
+
+      p.x += p.vx; p.y += p.vy;
+      p.life--;
+
+      const a = p.life / p.maxLife;
+      const tail = 6 + (1-a)*9 * (1 + fb*0.35);
+      const tx = p.x - p.vx*tail;
+      const ty = p.y - p.vy*tail;
+
+      const heat = p.heat;
+      const green = Math.floor(180 + 60*heat);
+      const blue  = Math.floor(80  + 80*heat);
+      const alpha = clamp(a*(0.95 + fb*0.10), 0, 1);
+
+      ctx.lineWidth = p.size;
+      ctx.strokeStyle = `rgba(255,${green},${blue},${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+
+      if(Math.random() < (0.12 + fb*0.10) * p.tw){
+        ctx.fillStyle = `rgba(255,255,255,${alpha*(0.65 + fb*0.20)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size*0.95, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      if(p.life <= 0){
+        if(Math.random() < 0.35){
+          embers.push({
+            x: p.x, y: p.y,
+            vx: p.vx*0.2 + rand(-0.2,0.2),
+            vy: p.vy*0.2 + rand(-0.3,0.1),
+            life: Math.floor(rand(80, 180)),
+            maxLife: 180,
+            size: rand(0.6, 1.6)
+          });
+        }
+        sparks.splice(i,1);
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawEmbers(){
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const fb = flashBoost;
+    for(let i=embers.length-1; i>=0; i--){
+      const e = embers[i];
+      e.vx *= 0.995;
+      e.vy = e.vy*0.995 + gravity*0.35;
+      e.x += e.vx; e.y += e.vy;
+      e.life--;
+
+      const a = clamp(e.life/e.maxLife, 0, 1);
+      ctx.fillStyle = `rgba(255,140,40,${a*(0.33 + fb*0.10)})`;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.size, 0, Math.PI*2);
+      ctx.fill();
+
+      if(e.life <= 0) embers.splice(i,1);
+    }
+    ctx.restore();
+  }
+
+  function fadeFrame(){
+    const alpha = clamp(0.18 - flashBoost*0.04, 0.10, 0.18);
+    ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+    ctx.fillRect(0,0, innerWidth, innerHeight);
+  }
+
+  function updateTimer(){
+    if(!burning) return;
+    const now = Date.now();
+    const left = Math.max(0, Math.ceil((startAt + DURATION_MS - now)/1000));
+    timerEl.textContent = `剩餘 ${left} 秒`;
+    if(left <= 0){
+      burning = false;
+      timerEl.textContent = "熄滅了 ✨";
+    }
+  }
+
+  function loop(){
+    flashBoost *= FLASH_DECAY;
+    if (flashBoost < 0.001) flashBoost = 0;
+
+    fadeFrame();
+    drawWireStick();
+
+    if(burning){
+      const now = Date.now();
+      const t01 = clamp((now - startAt)/DURATION_MS, 0, 1);
+      const pwr = intensity(t01);
+      const heat = clamp(1.1 - t01*0.6, 0.2, 1.0);
+
+      const count = Math.floor(6*pwr + rand(0,3));
+      spawnSpark(count, 1.0 + pwr*0.35, heat);
+
+      const burstP = 0.08*pwr + flashBoost*0.06;
+      if(Math.random() < burstP){
+        spawnSpark(10 + Math.floor(12*pwr), 1.4 + pwr*0.25, 1.0);
+      }
+
+      if(Math.random() < (0.60 + flashBoost*0.10)) spawnEmber(1 + Math.floor(pwr));
+      drawCore(pwr);
+    }
+
+    drawSparks();
+    drawEmbers();
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Start logic ----------
+  function startBurn(){
+    burning = true;
+    startAt = Date.now();
+    timerEl.textContent = "燃燒中...";
+    ctx.fillStyle = "rgba(0,0,0,1)";
+    ctx.fillRect(0,0, innerWidth, innerHeight);
+  }
+
+  btnStart.addEventListener("click", async () => {
+    const ok = await ensureMotionPermission();
+    if (ok) attachMotionListeners();
+    startBurn();
+  });
+
+  btnOverlayStart.addEventListener("click", async () => {
+    await enterFullscreen();
+    syncFsButton();
+    setTimeout(resize, 150);
+
+    const ok = await ensureMotionPermission();
+    if (ok) attachMotionListeners();
+
+    overlay.style.display = "none";
+    startBurn();
+  });
+
+  // initial stars
+  for(let i=0;i<120;i++){
+    embers.push({
+      x: rand(0, innerWidth),
+      y: rand(0, innerHeight),
+      vx: rand(-0.05, 0.05),
+      vy: rand(-0.05, 0.05),
+      life: Math.floor(rand(60, 220)),
+      maxLife: 220,
+      size: rand(0.4, 1.2)
+    });
+  }
+
+  setInterval(updateTimer, 200);
+  syncFsButton();
+  loop();
+
+  // ---------- Auto-attempt fullscreen on load ----------
+  (async () => {
+    const okFs = await enterFullscreen();
+    syncFsButton();
+    if (!okFs) {
+      overlay.style.display = "flex";
+    } else {
+      setTimeout(resize, 120);
+    }
+  })();
+
+})();
+</script>
+</body>
+</html>
