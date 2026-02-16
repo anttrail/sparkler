@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>手拿仙女棒 ✨ v3（全螢幕/鐵絲/搖晃增亮/下方置中）</title>
+<title>手拿仙女棒 ✨ v4（越燒越短 / 底部置中）</title>
 <style>
   html, body { margin:0; padding:0; background:#000; overflow:hidden; height:100%; }
   canvas { display:block; touch-action:none; }
@@ -27,7 +27,6 @@
   }
   .hint{ margin-top:8px; opacity:.8; font-size:12px; max-width: 92vw; pointer-events:none; }
 
-  /* Fullscreen starter overlay (for browsers that block auto fullscreen) */
   .overlay{
     position:fixed; inset:0; z-index:999;
     display:flex; align-items:center; justify-content:center;
@@ -56,13 +55,13 @@
 </head>
 <body>
 
-<div class="ui" id="ui">
+<div class="ui">
   <div class="row">
     <button id="btnStart">點燃 ✨</button>
     <button id="btnFs" class="secondary">全螢幕</button>
     <span class="pill" id="timer">未點燃</span>
   </div>
-  <div class="hint">進入頁面：仙女棒在「底部中央」。拖曳＝移動手握位置。搖晃會更閃亮，然後慢慢恢復。</div>
+  <div class="hint">現在會「越燒越短」。初始：棒根在螢幕最下方、水平置中。</div>
 </div>
 
 <div class="overlay" id="overlay" style="display:none;">
@@ -72,7 +71,7 @@
       多數手機瀏覽器不允許「進頁面就自動全螢幕」；點一下即可進全螢幕並（iPhone）授權搖晃增亮功能。
     </div>
     <button class="bigbtn" id="btnOverlayStart">開始（全螢幕）</button>
-    <div class="small">不想全螢幕：也可以關掉這層後按右上「全螢幕」。</div>
+    <div class="small">不想全螢幕：關掉後按右上「全螢幕」。</div>
   </div>
 </div>
 
@@ -98,7 +97,7 @@
     if (isFullscreen()) return true;
     try {
       if (el.requestFullscreen) await el.requestFullscreen();
-      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); // iOS Safari
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
       return true;
     } catch (_) {
       return false;
@@ -121,10 +120,8 @@
     btnFs.textContent = isFullscreen() ? "退出全螢幕" : "全螢幕";
   }
   btnFs.addEventListener("click", toggleFullscreen);
-  document.addEventListener("fullscreenchange", syncFsButton);
-  document.addEventListener("webkitfullscreenchange", syncFsButton);
 
-  // ---------- Resize ----------
+  // ---------- Resize / initial position ----------
   let handleX;
   let handleY;
   let initialized = false;
@@ -137,10 +134,10 @@
     canvas.style.height = innerHeight + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // 初始定位：螢幕下方中央（只做一次）
+    // 初始定位：棒根「貼底」+ 水平置中（只做一次）
     if (!initialized) {
       handleX = innerWidth * 0.5;
-      handleY = innerHeight - 70;
+      handleY = innerHeight - 6;   // 幾乎貼到底
       initialized = true;
     }
   }
@@ -153,15 +150,14 @@
   let burning = false;
   let startAt = 0;
 
-  // Handheld stick: always vertical
-  const stickLen = () => Math.min(innerHeight * 0.42, 390);
+  const baseStickLen = () => Math.min(innerHeight * 0.42, 390);
   const stickWidth = 9.5;
   const sparkOffset = 14;
 
-  // Shake flash boost (0..~2.2), decays over time
+  // Shake flash boost
   let flashBoost = 0;
-  const FLASH_DECAY = 0.92; // bigger -> slower decay
-  const FLASH_GAIN = 0.045; // shake sensitivity
+  const FLASH_DECAY = 0.92;
+  const FLASH_GAIN = 0.045;
 
   // Physics
   const gravity = 0.06;
@@ -177,15 +173,29 @@
     return { x: vx/m, y: vy/m };
   }
 
+  // 燒到哪裡：0~1
+  function burnProgress(){
+    if (!burning) return 0;
+    return clamp((Date.now() - startAt) / DURATION_MS, 0, 1);
+  }
+
+  // 越燒越短：最多縮短 45%
+  function currentStickLen(){
+    const p = burnProgress();
+    const shrink = 0.45 * p;                // 0 -> 0.45
+    const len = baseStickLen() * (1 - shrink);
+    return Math.max(120, len);              // 不要短到太離譜
+  }
+
   function tipPos(){
-    const len = stickLen();
+    const len = currentStickLen();
     return { x: handleX, y: handleY - len };
   }
 
-  // Move handle by dragging (still feels like holding)
+  // Move handle by dragging
   function setHandle(px, py){
     handleX = clamp(px, 44, innerWidth - 44);
-    handleY = clamp(py, innerHeight*0.55, innerHeight - 44);
+    handleY = clamp(py, innerHeight*0.55, innerHeight - 2);
   }
   addEventListener("pointerdown", (e)=> setHandle(e.clientX, e.clientY), {passive:true});
   addEventListener("pointermove", (e)=> {
@@ -216,11 +226,7 @@
       const a = e.accelerationIncludingGravity || e.acceleration;
       if (!a) return;
       const ax = a.x || 0, ay = a.y || 0, az = a.z || 0;
-
-      // magnitude
       const mag = Math.sqrt(ax*ax + ay*ay + az*az);
-
-      // map to shake intensity
       const shake = clamp((mag - 9.8) * 0.8, 0, 18);
       flashBoost = clamp(flashBoost + shake * FLASH_GAIN, 0, 2.2);
     }, { passive: true });
@@ -238,7 +244,6 @@
     const fb = flashBoost;
     const countBoost = 1 + fb * 0.85;
     const speedBoost = 1 + fb * 0.55;
-
     const N = Math.floor(n * countBoost);
 
     for(let i=0;i<N;i++){
@@ -247,7 +252,6 @@
         spread * 1.0,
         (-1.0) + spread * 0.18
       );
-
       const spd  = rand(2.2, 6.8) * power * speedBoost;
       const life = Math.floor(rand(20, 55));
       const size = rand(0.8, 2.6) * (1 + fb * 0.15);
@@ -312,9 +316,10 @@
     ctx.restore();
   }
 
-  // --- Twisted wire stick (double strand + highlights) ---
+  // --- Twisted wire stick, with char length increasing as it burns ---
   function drawWireStick(){
-    const len = stickLen();
+    const p = burnProgress();
+    const len = currentStickLen();
     const tip = tipPos();
 
     const x0 = handleX, y0 = handleY;
@@ -329,7 +334,7 @@
 
     ctx.save();
 
-    // faint warm glow
+    // warm glow
     ctx.globalCompositeOperation = "lighter";
     ctx.strokeStyle = "rgba(255,200,80,0.06)";
     ctx.lineWidth = stickWidth + 7;
@@ -374,15 +379,16 @@
     ctx.lineWidth = stickWidth + 5;
     ctx.beginPath();
     ctx.moveTo(handleX, handleY);
-    ctx.lineTo(handleX, handleY + Math.min(80, innerHeight*0.09));
+    ctx.lineTo(handleX, handleY + Math.min(90, innerHeight*0.10));
     ctx.stroke();
 
-    // charred tip
-    ctx.strokeStyle = "rgba(25,25,25,0.88)";
+    // char zone grows with burn
+    const charLen = Math.min(24 + p*70, len*0.35);
+    ctx.strokeStyle = "rgba(25,25,25,0.90)";
     ctx.lineWidth = stickWidth + 1;
     ctx.beginPath();
     ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(tip.x, tip.y + Math.min(24, len*0.08));
+    ctx.lineTo(tip.x, tip.y + charLen);
     ctx.stroke();
 
     ctx.restore();
@@ -391,7 +397,6 @@
   function drawSparks(){
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-
     const fb = flashBoost;
 
     for(let i=sparks.length-1; i>=0; i--){
@@ -427,19 +432,7 @@
         ctx.fill();
       }
 
-      if(p.life <= 0){
-        if(Math.random() < 0.35){
-          embers.push({
-            x: p.x, y: p.y,
-            vx: p.vx*0.2 + rand(-0.2,0.2),
-            vy: p.vy*0.2 + rand(-0.3,0.1),
-            life: Math.floor(rand(80, 180)),
-            maxLife: 180,
-            size: rand(0.6, 1.6)
-          });
-        }
-        sparks.splice(i,1);
-      }
+      if(p.life <= 0) sparks.splice(i,1);
     }
     ctx.restore();
   }
@@ -561,11 +554,8 @@
   (async () => {
     const okFs = await enterFullscreen();
     syncFsButton();
-    if (!okFs) {
-      overlay.style.display = "flex";
-    } else {
-      setTimeout(resize, 120);
-    }
+    if (!okFs) overlay.style.display = "flex";
+    else setTimeout(resize, 120);
   })();
 
 })();
